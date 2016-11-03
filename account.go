@@ -73,5 +73,5 @@ func (a *Account) Credit(amount int64) {
 
 // AccountList holds a list of bank accounts
 type AccountList struct {
-	Accounts []Account `json:"accounts"`
+	Accounts []*Account `json:"accounts"`
 }

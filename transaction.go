@@ -109,17 +109,19 @@ func (t *Transaction) MarshalJSON() ([]byte, error) {
 
 // TransactionList stores a list of transactions
 type TransactionList struct {
-	Transactions []Transaction `json:"transactions"`
+	Transactions []*Transaction `json:"transactions"`
 }
 
-func (t TransactionList) Len() int {
-	return len(t.Transactions)
+type ByCreated []*Transaction
+
+func (t ByCreated) Len() int {
+	return len(t)
 }
 
-func (t TransactionList) Less(i, j int) bool {
-	return t.Transactions[i].Created > t.Transactions[j].Created
+func (t ByCreated) Less(i, j int) bool {
+	return t[i].Created < t[j].Created
 }
 
-func (t TransactionList) Swap(i, j int) {
-	t.Transactions[i], t.Transactions[j] = t.Transactions[j], t.Transactions[i]
+func (t ByCreated) Swap(i, j int) {
+	t[i], t[j] = t[j], t[i]
 }

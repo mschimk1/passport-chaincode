@@ -125,7 +125,7 @@ func (cc *Chaincode) GetAccountList(stub *shim.ChaincodeStub, args []string) ([]
 		return nil, fmt.Errorf("Get account list failed. Error: %s", err)
 	}
 	var accountIDs []string
-	accountList := AccountList{[]Account{}}
+	accountList := AccountList{}
 
 	for i := 0; i < len(rows); i++ {
 		// column 1 in account lookup table
@@ -140,7 +140,7 @@ func (cc *Chaincode) GetAccountList(stub *shim.ChaincodeStub, args []string) ([]
 		}
 		a := new(Account)
 		bytesToStruct(accountData, a)
-		accountList.Accounts = append(accountList.Accounts, *a)
+		accountList.Accounts = append(accountList.Accounts, a)
 	}
 	jsonList, _ := json.Marshal(accountList)
 
@@ -262,7 +262,7 @@ func (cc *Chaincode) GetTransactionList(stub *shim.ChaincodeStub, args []string)
 	if err != nil {
 		return nil, fmt.Errorf("Get transaction list failed. Error: %s", err)
 	}
-	transactionList := TransactionList{[]Transaction{}}
+	transactionList := TransactionList{}
 	for _, row := range rows {
 		t := new(Transaction)
 		bytesToStruct(row.Columns[dataCol].GetBytes(), t)
@@ -270,9 +270,9 @@ func (cc *Chaincode) GetTransactionList(stub *shim.ChaincodeStub, args []string)
 			logger.Errorf("Error unmarshalling transaction data")
 			continue
 		}
-		transactionList.Transactions = append(transactionList.Transactions, *t)
+		transactionList.Transactions = append(transactionList.Transactions, t)
 	}
-	sort.Sort(transactionList)
+	sort.Sort(sort.Reverse(ByCreated(transactionList.Transactions)))
 	jsonList, _ := json.Marshal(transactionList)
 
 	logger.Debugf("Returning transaction list: %s", jsonList)
@@ -305,11 +305,11 @@ func (cc *Chaincode) TopupAccount(stub *shim.ChaincodeStub, args []string) ([]by
 	if account == nil {
 		return nil, errors.New("Error unmarshalling account data")
 	}
-	balance, err := strconv.ParseInt(args[1], 10, 64)
+	amount, err := strconv.ParseInt(args[1], 10, 64)
 	if err != nil {
-		return nil, fmt.Errorf("Error parsing account balance value %s", args[1])
+		return nil, fmt.Errorf("Error parsing amount value %s", args[1])
 	}
-	account.Balance += balance
+	account.Credit(amount)
 	accountData, err = json.Marshal(account)
 	if err != nil {
 		return nil, errors.New("Error marshalling account data")

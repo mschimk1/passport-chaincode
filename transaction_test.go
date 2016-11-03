@@ -51,8 +51,11 @@ func TestTransactionListSort(t *testing.T) {
 		ID:        "2",
 		TxDetails: TxDetails{Created: now.Unix()},
 	}
-	transactionList := TransactionList{[]Transaction{t1, t2}}
-	sort.Sort(transactionList)
+	transactionList := TransactionList{}
+	transactionList.Transactions = append(transactionList.Transactions, &t1)
+	transactionList.Transactions = append(transactionList.Transactions, &t2)
+	sort.Sort(sort.Reverse(ByCreated(transactionList.Transactions)))
+
 	if transactionList.Transactions[0].ID != "2" {
 		t.Errorf("Expected transaction %s, but got transaction %s", t2.ID, t1.ID)
 	}
