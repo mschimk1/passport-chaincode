@@ -5,7 +5,7 @@
 This application was written to demonstrate how money transfers can be modeled
 on the Blockchain. Accounts and transactions are represented as ledger tables.
 
-This chaincode uses the Hyperledger Fabric v0.5-developer-preview API.
+This version of the chaincode uses the Hyperledger Fabric v0.5-developer-preview / IBM Bluemix Blockchain Service v0.4.2.
 
 ## Available Chaincode APIs
 
@@ -22,7 +22,24 @@ peer chaincode deploy -l golang -n mycc -c '{"Function": "Init", "Args":[""]}'
 *Usage (JSON RPC)*
 
 ```
-
+{
+  "jsonrpc": "2.0",
+  "method": "deploy",
+  "params": {
+    "type": 1,
+    "chaincodeID": {
+      "path": "https://github.com/mschimk1/passport-chaincode"
+    },
+    "ctorMsg": {
+      "function": "init",
+      "args": [
+        ""
+      ]
+    },
+    "secureContext": "user_type1_0"
+  },
+  "id": 1
+}
 ```
 
 ### Invoke APIs and Usage

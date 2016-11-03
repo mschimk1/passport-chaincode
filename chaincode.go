@@ -33,7 +33,6 @@ import (
 	"time"
 
 	"github.com/hyperledger/fabric/core/chaincode/shim" // v0.5
-	"github.com/op/go-logging"
 )
 
 const (
@@ -47,7 +46,7 @@ const (
 
 var (
 	// passport chaincode application logger
-	logger = logging.MustGetLogger("passport-chaincode")
+	logger = shim.NewLogger("passport-chaincode")
 	// mapping of chaincode handler functions
 	handlerMap = NewHandlerMap()
 	// Ledger table names - Init method recreates these tables every time a chaincode deploy is invoked
@@ -61,8 +60,8 @@ var (
 )
 
 func main() {
-	initLogging(logging.DEBUG)
-	logger.Info("Starting passport chaincode for IBM Bluemix Blockchain service v0.4.3")
+	initLogging()
+	logger.Infof("Starting passport chaincode for IBM Bluemix Blockchain service v0.4.3")
 	cc := new(Chaincode)
 	cc.registerHandlers()
 	err := shim.Start(cc)
@@ -268,7 +267,7 @@ func (cc *Chaincode) GetTransactionList(stub *shim.ChaincodeStub, args []string)
 		t := new(Transaction)
 		bytesToStruct(row.Columns[dataCol].GetBytes(), t)
 		if t == nil {
-			logger.Error("Error unmarshalling transaction data")
+			logger.Errorf("Error unmarshalling transaction data")
 			continue
 		}
 		transactionList.Transactions = append(transactionList.Transactions, *t)
@@ -395,11 +394,10 @@ func (cc *Chaincode) creditAccount(stub *shim.ChaincodeStub, a *Account, amount 
 //-------------------------------------------------
 // Helpers
 //-------------------------------------------------
-func initLogging(logLevel logging.Level) {
-	format := logging.MustStringFormatter("[%{time:2006-01-02 15:04:05.000}] %{shortfunc} %{level:.5s}: %{message}")
-	backend := logging.NewLogBackend(os.Stderr, "", 0)
-	backendFormatter := logging.NewBackendFormatter(backend, format)
-	logging.SetBackend(backendFormatter).SetLevel(logLevel, "passport-chaincode")
+func initLogging() {
+	logger.SetLevel(shim.LogInfo)
+	logLevel, _ := shim.LogLevel(os.Getenv("SHIM_LOGGING_LEVEL"))
+	shim.SetLoggingLevel(logLevel)
 }
 
 // Registers handler function mappings
@@ -497,7 +495,7 @@ func (cc *Chaincode) updateLedger(stub *shim.ChaincodeStub, name string, keys []
 		return err
 	}
 	if !ok {
-		logger.Error("Row with given key already exists")
+		logger.Errorf("Row with given key already exists")
 		return errors.New("Row with given key already exists")
 	}
 	logger.Debugf("Insert row into table %s successful.", name)
