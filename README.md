@@ -2,10 +2,9 @@
 
 ## Application Overview
 
-This application was written to demonstrate how money transfers can be modeled
-on the Blockchain. Accounts and transactions are represented as ledger tables.
+This application was written to demonstrate how money transfers can be modeled on the Blockchain.
 
-This version of the chaincode uses the Hyperledger Fabric v0.5-developer-preview / IBM Bluemix Blockchain Service v0.4.2.
+This version of the chaincode uses Hyperledger Fabric v0.6.
 
 ## Available Chaincode APIs
 
@@ -82,7 +81,7 @@ peer chaincode invoke -l golang -n mycc -c '{"Function": "OpenAccount", "Args":[
 *Usage (CLI)*
 
 ```
-peer chaincode invoke -l golang -n mycc -c '{"Function": "CloseAccount", "Args":["1"]}'
+peer chaincode invoke -l golang -n mycc -c '{"Function": "CloseAccount", "Args":["12345", "1"]}'
 ```
 
 *Usage (JSON RPC)*
@@ -95,7 +94,7 @@ peer chaincode invoke -l golang -n mycc -c '{"Function": "CloseAccount", "Args":
 *Usage (CLI)*
 
 ```
-peer chaincode invoke -l golang -n mycc -c '{"Function": "TopupAccount", "Args":["1", "9000"]}'
+peer chaincode invoke -l golang -n mycc -c '{"Function": "TopupAccount", "Args":["12345", "1", "9000"]}'
 ```
 
 *Usage (JSON RPC)*
@@ -111,7 +110,7 @@ peer chaincode invoke -l golang -n mycc -c '{"Function": "TopupAccount", "Args":
     "ctorMsg": {
       "function": "TopupAccount",
       "args": [
-        "1", "1100"
+        "12345", "1", "1100"
       ]
     },
     "secureContext": "user_type1_0"
@@ -125,7 +124,7 @@ peer chaincode invoke -l golang -n mycc -c '{"Function": "TopupAccount", "Args":
 *Usage (CLI)*
 
 ```
-peer chaincode invoke -l golang -n mycc -c '{"Function": "TransferMoney", "Args":["{\"from_account\":\"1\", \"to_account\":\"2\", \"currency\":\"AUD\", \"amount\":1000}"]}'
+peer chaincode invoke -l golang -n mycc -c '{"Function": "TransferMoney", "Args":["{\"from_customer\":\"1234\", \"from_account\":\"1\", \"to_customer\":\"5678\", \"to_account\":\"2\", \"currency\":\"AUD\", \"amount\":1000}"]}'
 ```
 
 *Usage (JSON RPC)*
@@ -141,7 +140,7 @@ peer chaincode invoke -l golang -n mycc -c '{"Function": "TransferMoney", "Args"
     "ctorMsg": {
       "function": "TransferMoney",
       "args": [
-        "{\"from_account\":\"1\", \"to_account\":\"2\", \"currency\":\"AUD\", \"amount\":1000}"
+        "{\"from_customer\":\"1234\", \"from_account\":\"1\", \"to_customer\":\"5678\", \"to_account\":\"2\", \"currency\":\"AUD\", \"amount\":1000}"
       ]
     },
     "secureContext": "user_type1_0"
@@ -187,7 +186,7 @@ peer chaincode invoke -l golang -n mycc -c '{"Function": "GetAccountList", "Args
 *Usage (CLI)*
 
 ```
-peer chaincode invoke -l golang -n mycc -c '{"Function": "GetAccount", "Args":["1"]}'
+peer chaincode invoke -l golang -n mycc -c '{"Function": "GetAccount", "Args":["1234", "1"]}'
 ```
 
 *Usage (JSON RPC)*
@@ -203,7 +202,7 @@ peer chaincode invoke -l golang -n mycc -c '{"Function": "GetAccount", "Args":["
     "ctorMsg": {
       "function": "GetAccount",
       "args": [
-        "1"
+        "1234", "1"
       ]
     },
     "secureContext": "user_type1_0"
@@ -217,7 +216,7 @@ peer chaincode invoke -l golang -n mycc -c '{"Function": "GetAccount", "Args":["
 *Usage (CLI)*
 
 ```
-peer chaincode invoke -l golang -n mycc -c '{"Function": "GetTransactionList", "Args":["1"]}'
+peer chaincode invoke -l golang -n mycc -c '{"Function": "GetTransactionList", "Args":["1234", "1"]}'
 ```
 
 *Usage (JSON RPC)*
@@ -233,7 +232,7 @@ peer chaincode invoke -l golang -n mycc -c '{"Function": "GetTransactionList", "
     "ctorMsg": {
       "function": "GetTransactionList",
       "args": [
-        "1"
+        "1234", "1"
       ]
     },
     "secureContext": "user_type1_0"
@@ -247,7 +246,7 @@ peer chaincode invoke -l golang -n mycc -c '{"Function": "GetTransactionList", "
 *Usage (CLI)*
 
 ```
-peer chaincode invoke -l golang -n mycc -c '{"Function": "GetTransaction", "Args":["1", "47e1d9adcba83ca019c403db8ced444a9221849821be625e9edaffc6a791b119"]}'
+peer chaincode invoke -l golang -n mycc -c '{"Function": "GetTransaction", "Args":["1234", "1", "cc0f9b4d761e64e548827f2de4b49d8f"]}'
 ```
 
 *Usage (JSON RPC)*
@@ -263,7 +262,7 @@ peer chaincode invoke -l golang -n mycc -c '{"Function": "GetTransaction", "Args
     "ctorMsg": {
       "function": "GetTransaction",
       "args": [
-        "1", "6086c4be7c5bfe31c20fb445a48b379e239d9a8d0143a3ca691b32a50cf05615"
+        "1234", "1", "cc0f9b4d761e64e548827f2de4b49d8f"
       ]
     },
     "secureContext": "user_type1_0"
@@ -274,7 +273,5 @@ peer chaincode invoke -l golang -n mycc -c '{"Function": "GetTransaction", "Args
 
 ## Notes
 
-* Chaincode deploy / init method recreates the ledger data tables
-* This version of the application assumes that bank account IDs are unique - it generates a random 8 digit ID if none is provided in an OpenAccount request
-
+* This chaincode makes use of partial keys for account and transaction list queries
 

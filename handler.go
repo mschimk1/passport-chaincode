@@ -7,7 +7,7 @@ import (
 )
 
 // HandlerFunc is a chaincode API handler function type
-type HandlerFunc func(stub *shim.ChaincodeStub, args []string) ([]byte, error)
+type HandlerFunc func(stub shim.ChaincodeStubInterface, args []string) ([]byte, error)
 
 // FuncMap is a mapping of function name to handler function
 type FuncMap struct {
@@ -25,7 +25,7 @@ func (p *FuncMap) Add(name string, handler HandlerFunc) {
 }
 
 // Handle gets a handler function by name and invokes it
-func (p *FuncMap) Handle(stub *shim.ChaincodeStub, function string, args []string) ([]byte, error) {
+func (p *FuncMap) Handle(stub shim.ChaincodeStubInterface, function string, args []string) ([]byte, error) {
 	for name, handlerFunc := range p.handlers {
 		if name == function {
 			return handlerFunc(stub, args)

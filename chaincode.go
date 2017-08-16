@@ -1,5 +1,5 @@
 /*
-Copyright IBM Corp 2016 All Rights Reserved.
+Copyright IBM Corp 2017 All Rights Reserved.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -22,26 +22,16 @@ fabric blockchain service on IBM Bluemix.
 package main
 
 import (
-	"crypto/sha256"
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/rand"
 	"os"
+	. "passport-chaincode/model"
 	"sort"
 	"strconv"
-	"time"
+	"unicode/utf8"
 
-	"github.com/hyperledger/fabric/core/chaincode/shim" // v0.5
-)
-
-const (
-	// AccountTable is the account ledger table name
-	AccountTable = "AccountTable"
-	// AccountLookupTable is used for account list range queries by customer ID
-	AccountLookupTable = "AccountLookupTable"
-	// TransactionTable is the transaction ledger table name
-	TransactionTable = "TransactionTable"
+	"github.com/hyperledger/fabric/core/chaincode/shim" // v0.6
 )
 
 var (
@@ -49,19 +39,11 @@ var (
 	logger = shim.NewLogger("passport-chaincode")
 	// mapping of chaincode handler functions
 	handlerMap = NewHandlerMap()
-	// Ledger table names - Init method recreates these tables every time a chaincode deploy is invoked
-	dataTables = []string{AccountLookupTable, AccountTable, TransactionTable}
-	// mapping of table name to key columns
-	keyColumnDefinitions = map[string][]string{
-		AccountLookupTable: []string{"CustomerID", "ID"},
-		AccountTable:       []string{"ID"},
-		TransactionTable:   []string{"AccountID", "ID"},
-	}
 )
 
 func main() {
 	initLogging()
-	logger.Infof("Starting passport chaincode for IBM Bluemix Blockchain service v0.4.3")
+	logger.Infof("Starting passport chaincode for IBM Bluemix Blockchain service v0.6")
 	cc := new(Chaincode)
 	cc.registerHandlers()
 	err := shim.Start(cc)
@@ -78,31 +60,21 @@ type Chaincode struct{}
 //------------------------
 
 // Init called to initialize the chaincode
-func (cc *Chaincode) Init(stub *shim.ChaincodeStub, function string, args []string) ([]byte, error) {
-	for _, name := range dataTables {
-		if err := cc.deleteLedgerTable(stub, name); err != nil {
-			logger.Errorf("Error deleting table %s. Error: %s", name, err)
-			return nil, fmt.Errorf("Error deleting table %s", name)
-		}
-		if err := cc.createLedgerTable(stub, name, keyColumnDefinitions[name]); err != nil {
-			logger.Errorf("Error creating table %s. Error: %s", name, err)
-			return nil, fmt.Errorf("Error creating table %s", name)
-		}
-	}
+func (cc *Chaincode) Init(stub shim.ChaincodeStubInterface, function string, args []string) ([]byte, error) {
 	return nil, nil
 }
 
 // Invoke chaincode interface implementation
-func (cc *Chaincode) Invoke(stub *shim.ChaincodeStub, function string, args []string) ([]byte, error) {
+func (cc *Chaincode) Invoke(stub shim.ChaincodeStubInterface, function string, args []string) ([]byte, error) {
 	return cc.handleInvocation(stub, function, args)
 }
 
 // Query chaincode interface implementation
-func (cc *Chaincode) Query(stub *shim.ChaincodeStub, function string, args []string) ([]byte, error) {
+func (cc *Chaincode) Query(stub shim.ChaincodeStubInterface, function string, args []string) ([]byte, error) {
 	return cc.handleInvocation(stub, function, args)
 }
 
-func (cc *Chaincode) handleInvocation(stub *shim.ChaincodeStub, function string, args []string) ([]byte, error) {
+func (cc *Chaincode) handleInvocation(stub shim.ChaincodeStubInterface, function string, args []string) ([]byte, error) {
 	logger.Debugf("Invoking chaincode handler function %s with args %v", function, args)
 
 	res, err := handlerMap.Handle(stub, function, args)
@@ -117,277 +89,262 @@ func (cc *Chaincode) handleInvocation(stub *shim.ChaincodeStub, function string,
 //------------------
 
 // GetAccountList query blockchain accounts by customer ID
-func (cc *Chaincode) GetAccountList(stub *shim.ChaincodeStub, args []string) ([]byte, error) {
-	logger.Debugf("Entering with args %v", args)
+func (cc *Chaincode) GetAccountList(stub shim.ChaincodeStubInterface, args []string) ([]byte, error) {
+	logger.Debugf("Entering GetAccountList with args %v", args)
 
-	rows, err := cc.queryLedgerRows(stub, AccountLookupTable, args)
+	if len(args) == 0 {
+		return nil, errors.New("Missing required customer ID")
+	}
+	customerID := args[0]
+	// Query state using partial keys
+	keysIter, err := cc.partialCompositeKeyQuery(stub, AccountObjectType, []string{customerID})
 	if err != nil {
-		return nil, fmt.Errorf("Get account list failed. Error: %s", err)
+		logger.Errorf("Failed to get account list. Error: %s", err)
+		return nil, err
 	}
-	var accountIDs []string
 	accountList := AccountList{}
-
-	for i := 0; i < len(rows); i++ {
-		// column 1 in account lookup table
-		id := rows[i].Columns[1].GetString_()
-		accountIDs = append(accountIDs, id)
-	}
-
-	for _, id := range accountIDs {
-		accountData, err := cc.GetAccount(stub, []string{id})
-		if err != nil {
-			return nil, err
+	for keysIter.HasNext() {
+		_, accountBytes, _ := keysIter.Next()
+		acc := new(Account)
+		if err := json.Unmarshal(accountBytes, acc); err != nil {
+			logger.Errorf("Failed to get account details. Error: %s", err)
+			continue
 		}
-		a := new(Account)
-		bytesToStruct(accountData, a)
-		accountList.Accounts = append(accountList.Accounts, a)
+		accountList.Accounts = append(accountList.Accounts, acc)
 	}
 	jsonList, _ := json.Marshal(accountList)
-
 	logger.Debugf("Returning account list: %s", jsonList)
 	return jsonList, nil
 }
 
 // GetAccount query blockchain account by account ID
-func (cc *Chaincode) GetAccount(stub *shim.ChaincodeStub, args []string) ([]byte, error) {
-	logger.Debugf("Entering with args %v", args)
+func (cc *Chaincode) GetAccount(stub shim.ChaincodeStubInterface, args []string) ([]byte, error) {
+	logger.Debugf("Entering GetAccount with args %v", args)
 
-	data, err := cc.queryLedger(stub, AccountTable, args)
+	if len(args) != 2 {
+		return nil, errors.New("Missing required customer ID and / or account ID")
+	}
+
+	customerID := args[0]
+	accountID := args[1]
+
+	key, _ := cc.createCompositeKey(AccountObjectType, []string{customerID, accountID})
+	accountBytes, err := stub.GetState(key)
 	if err != nil {
 		logger.Errorf("Failed to get account details. Error: %s", err)
 		return nil, err
 	}
-	logger.Debugf("Returning account details: %s", data)
-	return data, nil
+	return accountBytes, nil
 }
 
-// OpenAccount opens an account
-func (cc *Chaincode) OpenAccount(stub *shim.ChaincodeStub, args []string) ([]byte, error) {
-	logger.Debugf("Entering with args %v", args)
+// OpenAccount opens an account, store into chaincode state as a JSON record
+func (cc *Chaincode) OpenAccount(stub shim.ChaincodeStubInterface, args []string) ([]byte, error) {
+	logger.Debugf("Entering OpenAccount with args %v", args)
+
 	if len(args) == 0 {
-		return nil, errors.New("Missing required account data JSON string")
+		return nil, errors.New("Missing required account data JSON")
 	}
-	account, err := createAccount([]byte(args[0]))
+
+	account, err := CreateAccount([]byte(args[0]))
 	if err != nil {
 		logger.Errorf("Error when creating new account. Error: %s", err)
 		return nil, fmt.Errorf("Error creating new account. Error: %s", err)
 	}
+	key, _ := cc.createCompositeKey(account.GetObjectType(), []string{account.CustomerID, account.ID})
 	accountData, _ := json.Marshal(account)
-	if err := cc.updateLedger(stub, AccountTable, []string{account.ID}, accountData); err != nil {
-		logger.Errorf("Error when updating updating account ledger table. Error: %s", err)
-		return nil, fmt.Errorf("Error updating account ledger table. Account ID already exists.")
+	stub.PutState(key, accountData)
+
+	return accountData, nil
+}
+
+// TopupAccount update account balance
+func (cc *Chaincode) TopupAccount(stub shim.ChaincodeStubInterface, args []string) ([]byte, error) {
+	logger.Debugf("Entering TopupAccount with args %v", args)
+
+	if len(args) != 3 {
+		return nil, errors.New("Missing required input arguments")
 	}
 
-	if err := cc.updateLedger(stub, AccountLookupTable, []string{account.CustomerID, account.ID}, []byte{}); err != nil {
-		logger.Errorf("Error when updating updating account lookup ledger table. Error: %s", err)
+	accountData, err := cc.GetAccount(stub, args[:2])
+	if err != nil {
 		return nil, err
 	}
+	if accountData == nil {
+		return nil, fmt.Errorf("Account with number %s not found.", args[1])
+	}
+	account := new(Account)
+	bytesToStruct([]byte(accountData), account)
+	amount, err := strconv.ParseInt(args[2], 10, 64)
+	if err != nil {
+		return nil, fmt.Errorf("Error parsing amount value %s", args[2])
+	}
+	account.Credit(amount)
+	key, _ := cc.createCompositeKey(account.GetObjectType(), []string{account.CustomerID, account.ID})
+	accountData, _ = json.Marshal(account)
+	stub.PutState(key, accountData)
 
 	return accountData, nil
 }
 
 // CloseAccount closes the given account
-func (cc *Chaincode) CloseAccount(stub *shim.ChaincodeStub, args []string) ([]byte, error) {
-	logger.Debugf("Entering with args %v", args)
-	accountData, err := cc.GetAccount(stub, args)
+func (cc *Chaincode) CloseAccount(stub shim.ChaincodeStubInterface, args []string) ([]byte, error) {
+	logger.Debugf("Entering CloseAccount with args %v", args)
+
+	if len(args) != 2 {
+		return nil, errors.New("Missing required customer ID and / or account ID")
+	}
+
+	accountData, err := cc.GetAccount(stub, args[:2])
 	if err != nil {
 		return nil, err
 	}
 	if accountData == nil {
-		return nil, fmt.Errorf("Account with number %s not found.", args[0])
+		return nil, fmt.Errorf("Account with number %s not found.", args[1])
 	}
+
 	account := new(Account)
 	bytesToStruct(accountData, account)
-	account.Deleted = true
+	account.Closed = true
+	key, _ := cc.createCompositeKey(account.GetObjectType(), []string{account.CustomerID, account.ID})
 	accountData, _ = json.Marshal(account)
-	if err := cc.replaceLedgerRow(stub, AccountTable, []string{account.ID}, accountData); err != nil {
-		logger.Errorf("Error when updating account ledger table for account number %s. Error: %s", args[0], err)
-		return nil, err
-	}
-	return nil, nil
+	stub.PutState(key, accountData)
+
+	return accountData, nil
 }
 
 // TransferMoney transfer money
-func (cc *Chaincode) TransferMoney(stub *shim.ChaincodeStub, args []string) ([]byte, error) {
+func (cc *Chaincode) TransferMoney(stub shim.ChaincodeStubInterface, args []string) ([]byte, error) {
 	logger.Debugf("Entering with args %v", args)
 
+	if len(args) == 0 {
+		return nil, errors.New("Missing transfer details JSON")
+	}
 	transferData := args[0]
 	t := new(Transfer)
 	bytesToStruct([]byte(transferData), t)
-	if err := t.validate(); err != nil {
+	if err := t.Validate(); err != nil {
 		return nil, err
 	}
-	accountData, err := cc.GetAccount(stub, []string{t.FromAccountID})
+	accountData, err := cc.GetAccount(stub, []string{t.FromCustomerID, t.FromAccountID})
 	if err != nil {
 		return nil, err
+	}
+	if accountData == nil {
+		return nil, fmt.Errorf("Account with number %s not found.", t.FromAccountID)
 	}
 	fromAccount := new(Account)
 	bytesToStruct(accountData, fromAccount)
-	accountData, err = cc.GetAccount(stub, []string{t.ToAccountID})
+	accountData, err = cc.GetAccount(stub, []string{t.ToCustomerID, t.ToAccountID})
 	if err != nil {
 		return nil, err
+	}
+	if accountData == nil {
+		return nil, fmt.Errorf("Account with number %s not found.", t.ToAccountID)
 	}
 	toAccount := new(Account)
 	bytesToStruct(accountData, toAccount)
 
-	txnRef := generateHash(transferData)
-
-	if fromAccount.Deleted || toAccount.Deleted {
-		cc.recordTransaction(stub, fromAccount.ID, txnRef, t, AccountClosed, Failed)
-		cc.recordTransaction(stub, toAccount.ID, txnRef, t, AccountClosed, Failed)
-		return nil, nil
+	if fromAccount.Closed {
+		cc.recordTransaction(stub, fromAccount.CustomerID, fromAccount.ID, t, AccountClosed, Failed)
+		return nil, fmt.Errorf("Cannot transfer money from closed account %s", t.FromAccountID)
 	}
 
-	if fromAccount.Balance-t.Amount <= 0 {
-		cc.recordTransaction(stub, fromAccount.ID, txnRef, t, InsufficientFunds, Failed)
-		cc.recordTransaction(stub, toAccount.ID, txnRef, t, InsufficientFunds, Failed)
-		return nil, nil
+	if toAccount.Closed {
+		cc.recordTransaction(stub, toAccount.CustomerID, toAccount.ID, t, AccountClosed, Failed)
+		return nil, fmt.Errorf("Cannot transfer money into closed account %s", t.ToAccountID)
 	}
 
-	cc.recordTransaction(stub, fromAccount.ID, txnRef, t, "", Debited)
-	cc.recordTransaction(stub, toAccount.ID, txnRef, t, "", Completed)
+	if fromAccount.Balance-t.Amount < 0 {
+		cc.recordTransaction(stub, fromAccount.CustomerID, fromAccount.ID, t, InsufficientFunds, Failed)
+		return nil, fmt.Errorf("Insufficient funds available in account %s", t.FromAccountID)
+	}
 
 	cc.debitAccount(stub, fromAccount, t.Amount+t.Fee)
+	cc.recordTransaction(stub, fromAccount.CustomerID, fromAccount.ID, t, "", Debited)
 	cc.creditAccount(stub, toAccount, t.Amount)
+	cc.recordTransaction(stub, toAccount.CustomerID, toAccount.ID, t, "", Credited)
 
 	return nil, nil
 }
 
 // GetTransactionList query blockchain accounts by account ID
-func (cc *Chaincode) GetTransactionList(stub *shim.ChaincodeStub, args []string) ([]byte, error) {
+func (cc *Chaincode) GetTransactionList(stub shim.ChaincodeStubInterface, args []string) ([]byte, error) {
 	logger.Debugf("Entering with args %v", args)
 
-	dataCol := len(keyColumnDefinitions[TransactionTable])
-	rows, err := cc.queryLedgerRows(stub, TransactionTable, args)
-	if err != nil {
-		return nil, fmt.Errorf("Get transaction list failed. Error: %s", err)
+	if len(args) != 2 {
+		return nil, errors.New("Missing required customer ID and / or account ID")
 	}
-	transactionList := TransactionList{}
-	for _, row := range rows {
-		t := new(Transaction)
-		bytesToStruct(row.Columns[dataCol].GetBytes(), t)
-		if t == nil {
-			logger.Errorf("Error unmarshalling transaction data")
+
+	customerID := args[0]
+	accountID := args[1]
+
+	// Query state using partial keys
+	keysIter, err := cc.partialCompositeKeyQuery(stub, TransactionObjectType, []string{customerID, accountID})
+	if err != nil {
+		logger.Errorf("Failed to get transaction list. Error: %s", err)
+		return nil, err
+	}
+	tranList := TransactionList{}
+	for keysIter.HasNext() {
+		_, txnBytes, _ := keysIter.Next()
+		txn := new(Transaction)
+		if err := json.Unmarshal(txnBytes, txn); err != nil {
+			logger.Errorf("Failed to get transaction details. Error: %s", err)
 			continue
 		}
-		transactionList.Transactions = append(transactionList.Transactions, t)
+		tranList.Transactions = append(tranList.Transactions, txn)
 	}
-	sort.Sort(sort.Reverse(ByCreated(transactionList.Transactions)))
-	jsonList, _ := json.Marshal(transactionList)
-
+	sort.Sort(sort.Reverse(ByCreated(tranList.Transactions)))
+	jsonList, _ := json.Marshal(tranList)
 	logger.Debugf("Returning transaction list: %s", jsonList)
 	return jsonList, nil
 }
 
 // GetTransaction query blockchain transaction by transaction ID
-func (cc *Chaincode) GetTransaction(stub *shim.ChaincodeStub, args []string) ([]byte, error) {
+func (cc *Chaincode) GetTransaction(stub shim.ChaincodeStubInterface, args []string) ([]byte, error) {
 	logger.Debugf("Entering with args %v", args)
 
-	txnData, err := cc.queryLedger(stub, TransactionTable, args)
+	if len(args) != 3 {
+		return nil, errors.New("Missing required account ID and / or transaction ID")
+	}
+
+	customerID := args[0]
+	accountID := args[1]
+	tranID := args[2]
+
+	key, _ := cc.createCompositeKey(TransactionObjectType, []string{customerID, accountID, tranID})
+	txnBytes, err := stub.GetState(key)
 	if err != nil {
 		logger.Errorf("Failed to get transaction details. Error: %s", err)
 		return nil, err
 	}
-	logger.Debugf("Returning transaction details: %s", txnData)
-	return txnData, nil
+	return txnBytes, nil
 }
 
-// TopupAccount update account balance
-func (cc *Chaincode) TopupAccount(stub *shim.ChaincodeStub, args []string) ([]byte, error) {
-	logger.Debugf("Entering with args %v", args)
-
-	accountData, err := cc.GetAccount(stub, []string{args[0]})
-	if err != nil {
-		return nil, err
-	}
-	account := new(Account)
-	bytesToStruct([]byte(accountData), account)
-	if account == nil {
-		return nil, errors.New("Error unmarshalling account data")
-	}
-	amount, err := strconv.ParseInt(args[1], 10, 64)
-	if err != nil {
-		return nil, fmt.Errorf("Error parsing amount value %s", args[1])
-	}
-	account.Credit(amount)
-	accountData, err = json.Marshal(account)
-	if err != nil {
-		return nil, errors.New("Error marshalling account data")
-	}
-	if err := cc.replaceLedgerRow(stub, AccountTable, []string{account.ID}, accountData); err != nil {
-		logger.Errorf("Error when updating account ledger table for account number %s. Error: %s", args[0], err)
-		return nil, err
-	}
-	return nil, nil
-}
-
-// Creates a new Account struct and returns a pointer to it
-func createAccount(accountData []byte) (*Account, error) {
-
-	account := new(Account)
-	if err := bytesToStruct([]byte(accountData), account); err != nil {
-		return nil, err
-	}
-	if account == nil {
-		return nil, errors.New("Error unmarshalling account data")
-	}
-	if account.CustomerID == "" {
-		return nil, errors.New("Missing required customer_id")
-	}
-	if account.ID == "" { // generate hash
-		account.ID = generateID(8)
-	}
-	if account.Created == 0 {
-		account.Created = time.Now().Unix()
-	}
-	if account.Balance <= 0 {
-		logger.Warningf("Initial account balance is %d", account.Balance)
-	}
-	return account, nil
-}
-
-func (cc *Chaincode) recordTransaction(stub *shim.ChaincodeStub, accountID string, id string, t *Transfer, code TxFailureCode, status TxStatus) error {
-
-	txn := &Transaction{ID: id, FailureCode: code, Status: status}
-	txn.TxDetails = TxDetails{
-		AccountID:   accountID,
-		Created:     time.Now().Unix(),
-		Amount:      t.Amount,
-		Fee:         t.Fee,
-		Currency:    t.Currency,
-		Description: t.Description,
-		Params:      t.Params,
-	}
+func (cc *Chaincode) recordTransaction(stub shim.ChaincodeStubInterface, customerID string, accountID string, t *Transfer, code TxFailureCode, status TxStatus) error {
+	txn, _ := CreateTransaction(customerID, accountID, t, code, status)
 	txnData, err := json.Marshal(txn)
 	if err != nil {
 		return fmt.Errorf("Error marshalling transaction data. Error: %s", err)
 	}
-	if err := cc.updateLedger(stub, TransactionTable, []string{accountID, id}, txnData); err != nil {
-		logger.Errorf("Error when updating updating transaction ledger table. Error: %s", err)
-		return fmt.Errorf("Error updating transaction ledger table. Transaction ID already exists.")
-	}
+	key, _ := cc.createCompositeKey(txn.GetObjectType(), []string{txn.CustomerID, txn.AccountID, txn.ID})
+	stub.PutState(key, txnData)
 	return nil
 }
 
-func (cc *Chaincode) debitAccount(stub *shim.ChaincodeStub, a *Account, amount int64) error {
+func (cc *Chaincode) debitAccount(stub shim.ChaincodeStubInterface, a *Account, amount int64) error {
 	a.Debit(amount)
-	buff, _ := json.Marshal(a)
-	err := cc.replaceLedgerRow(stub, AccountTable, []string{a.ID}, buff)
-	if err != nil {
-		logger.Errorf("Error when updating updating account ledger table. Error: %s", err)
-		return fmt.Errorf("{\"Error\":\"%s\"}", err)
-	}
+	accountData, _ := json.Marshal(a)
+	key, _ := cc.createCompositeKey(a.GetObjectType(), []string{a.CustomerID, a.ID})
+	stub.PutState(key, accountData)
 	return nil
 }
 
-func (cc *Chaincode) creditAccount(stub *shim.ChaincodeStub, a *Account, amount int64) error {
+func (cc *Chaincode) creditAccount(stub shim.ChaincodeStubInterface, a *Account, amount int64) error {
 	a.Credit(amount)
-	buff, _ := json.Marshal(a)
-	err := cc.replaceLedgerRow(stub, AccountTable, []string{a.ID}, buff)
-	if err != nil {
-		logger.Errorf("Error when updating updating account ledger table. Error: %s", err)
-		return fmt.Errorf("{\"Error\":\"%s\"}", err)
-	}
+	accountData, _ := json.Marshal(a)
+	key, _ := cc.createCompositeKey(a.GetObjectType(), []string{a.CustomerID, a.ID})
+	stub.PutState(key, accountData)
 	return nil
 }
 
@@ -412,182 +369,32 @@ func (cc *Chaincode) registerHandlers() {
 	handlerMap.Add("GetTransactionList", cc.GetTransactionList)
 }
 
-func (cc *Chaincode) queryLedger(stub *shim.ChaincodeStub, name string, keys []string) ([]byte, error) {
-	logger.Debugf("Entering with table name %s and key args %v", name, keys)
+// Helper functions
 
-	var columns []shim.Column
-	nCols := min(len(keyColumnDefinitions[name]), len(keys))
-	for i := 0; i < nCols; i++ {
-		columns = append(columns, *createKeyColumn(keys[i]))
+func (cc *Chaincode) createCompositeKey(objectType string, attributes []string) (string, error) {
+	const minKeyValue = "0"
+	key := objectType + minKeyValue
+	for _, att := range attributes {
+		key += att + minKeyValue
 	}
-	row, err := stub.GetRow(name, columns)
+	logger.Debugf("Created composite key: %s", key)
+	return key, nil
+}
+
+func (cc *Chaincode) partialCompositeKeyQuery(stub shim.ChaincodeStubInterface, objectType string, keys []string) (shim.StateRangeQueryIteratorInterface, error) {
+	partialCompositeKey, _ := cc.createCompositeKey(objectType, keys)
+	keysIter, err := stub.RangeQueryState(partialCompositeKey, partialCompositeKey+string(utf8.MaxRune))
 	if err != nil {
-		return nil, err
+		return nil, fmt.Errorf("Error fetching rows: %s", err)
 	}
-	if len(row.Columns) == 0 {
-		logger.Debugf("No data available for table name %s and key args %v", name, keys)
-		return nil, nil
-	}
-	logger.Debugf("Fetched %d columns from table %s", len(row.Columns), name)
-	// last column stores the data object
-	result := row.Columns[nCols].GetBytes()
-	logger.Debugf("Query ledger result %s", result)
-	return result, nil
+	return keysIter, nil
 }
 
-func (cc *Chaincode) queryLedgerRows(stub *shim.ChaincodeStub, name string, keys []string) ([]shim.Row, error) {
-	logger.Debugf("Entering with table name %s and key args %v", name, keys)
-
-	var columns []shim.Column
-	for _, key := range keys {
-		columns = append(columns, *createKeyColumn(key))
-	}
-
-	rowChan, err := stub.GetRows(name, columns)
-	if err != nil {
-		return nil, err
-	}
-	var rows []shim.Row
-	for rowChan != nil {
-		select {
-		case row, ok := <-rowChan:
-			if !ok {
-				rowChan = nil
-			} else {
-				rows = append(rows, row)
-			}
-		}
-	}
-	logger.Debugf("Fetched %d rows from ledger table %s", len(rows), name)
-	return rows, nil
-}
-
-func (cc *Chaincode) createLedgerTable(stub *shim.ChaincodeStub, name string, keys []string) error {
-	logger.Debugf("Entering with table name %s and key args %v", name, keys)
-
-	var columnDefs []*shim.ColumnDefinition
-	var colDef shim.ColumnDefinition
-	for i := range keys {
-		colDef := shim.ColumnDefinition{Name: "Key" + strconv.Itoa(i), Type: shim.ColumnDefinition_STRING, Key: true}
-		columnDefs = append(columnDefs, &colDef)
-	}
-	colDef = shim.ColumnDefinition{Name: name + "TableData", Type: shim.ColumnDefinition_BYTES, Key: false}
-	columnDefs = append(columnDefs, &colDef)
-
-	logger.Debugf("Creating table %s with column spec %v", name, keys)
-	if err := stub.CreateTable(name, columnDefs); err != nil {
-		return err
-	}
-	return nil
-}
-
-func (cc *Chaincode) deleteLedgerTable(stub *shim.ChaincodeStub, name string) error {
-	logger.Debugf("Deleting ledger table %s", name)
-	return stub.DeleteTable(name)
-}
-
-func (cc *Chaincode) updateLedger(stub *shim.ChaincodeStub, name string, keys []string, args []byte) error {
-	logger.Debugf("Entering with table name %s and key args %v", name, keys)
-	columns := createColumnSpec(keys, args)
-	row := shim.Row{Columns: columns}
-	ok, err := stub.InsertRow(name, row)
-	if err != nil {
-		return err
-	}
-	if !ok {
-		logger.Errorf("Row with given key already exists")
-		return errors.New("Row with given key already exists")
-	}
-	logger.Debugf("Insert row into table %s successful.", name)
-
-	return nil
-}
-
-func (cc *Chaincode) replaceLedgerRow(stub *shim.ChaincodeStub, name string, keys []string, args []byte) error {
-	logger.Debugf("Entering with table name %s and key args %v", name, keys)
-
-	columns := createColumnSpec(keys, args)
-	row := shim.Row{Columns: columns}
-	ok, err := stub.ReplaceRow(name, row)
-	if err != nil {
-		logger.Errorf("Error replacing ledger table table row. Error: %s", err)
-		return err
-	}
-	if !ok {
-		return errors.New("Error replacing ledger table table row.")
-	}
-	logger.Debugf("Successfully replaced row in ledger table %s.", name)
-	return nil
-}
-
-// Deletes a row from the given ledger table
-func (cc *Chaincode) deleteFromLedger(stub *shim.ChaincodeStub, name string, keys []string) error {
-	logger.Debugf("Entering with table name %s and key args %v", name, keys)
-
-	var columns []shim.Column
-	for _, key := range keys {
-		columns = append(columns, *createKeyColumn(key))
-	}
-	if err := stub.DeleteRow(name, columns); err != nil {
-		return err
-	}
-	logger.Debugf("Successfully deleted row from ledger table %s.", name)
-	return nil
-}
-
-func createKeyColumn(key string) *shim.Column {
-	return &shim.Column{Value: &shim.Column_String_{String_: key}}
-}
-
-// Creates key column definitions - only supports string keys for now
-func createKeyColumnSpec(keys []string) []*shim.Column {
-	var columns []*shim.Column
-	for _, key := range keys {
-		columns = append(columns, createKeyColumn(key))
-	}
-	return columns
-}
-
-// Creates column definitions - only supports string keys for now
-func createColumnSpec(keys []string, data []byte) []*shim.Column {
-	columns := createKeyColumnSpec(keys)
-	if data != nil {
-		colBytes := shim.Column{Value: &shim.Column_Bytes{Bytes: []byte(data)}}
-		columns = append(columns, &colBytes)
-	}
-	return columns
-}
-
-// Unmarshals byte slice into given data type
+// bytesToStruct unmarshals byte slice into given data type
 func bytesToStruct(data []byte, v interface{}) error {
 	if err := json.Unmarshal(data, v); err != nil {
 		logger.Errorf("Error unmarshalling data for type %T", v)
 		return err
 	}
 	return nil
-}
-
-// Generates a sha256 hash of the given message
-func generateHash(msg string) string {
-	msgHash := sha256.Sum256([]byte(msg))
-	return fmt.Sprintf("%x", msgHash)
-}
-
-// Generates a fixed length string of random digits
-func generateID(length int) string {
-	rand.Seed(time.Now().UnixNano())
-	r := []rune("1234567890")
-	b := make([]rune, length)
-	for i := range b {
-		b[i] = r[rand.Intn(len(r))]
-	}
-	return string(b)
-}
-
-// min helper for int types
-func min(x, y int) int {
-	if x < y {
-		return x
-	}
-	return y
 }

@@ -2,66 +2,56 @@ package main
 
 import (
 	"reflect"
-	"testing"
 
 	"github.com/hyperledger/fabric/core/chaincode/shim"
+	"github.com/stretchr/testify/suite"
 )
 
+type HandlerSuite struct {
+	suite.Suite
+}
+
 // test handler function
-func testFn(stub *shim.ChaincodeStub, args []string) ([]byte, error) {
+func testFn(stub shim.ChaincodeStubInterface, args []string) ([]byte, error) {
 	return []byte("Success"), nil
 }
 
-func TestCreateHandlerMap(t *testing.T) {
+func (suite *HandlerSuite) TestCreateHandlerMap() {
 	funcMap := NewHandlerMap()
-	if len(funcMap.handlers) != 0 {
-		t.Errorf("Expected empty handler map, but got %v", funcMap.handlers)
-	}
+	suite.Equal(0, len(funcMap.handlers), "Expected empty handler map")
 }
 
-func TestAddOneHandler(t *testing.T) {
+func (suite *HandlerSuite) TestAddOneHandler() {
 	funcMap := NewHandlerMap()
 	funcMap.Add("testFn", testFn)
-	if len(funcMap.handlers) != 1 {
-		t.Errorf("Expected 1 handler function, but got %d", len(funcMap.handlers))
-	}
+	suite.Equal(1, len(funcMap.handlers), "Expected 1 handler in map")
 }
 
-func TestAddMultipleHandlers(t *testing.T) {
+func (suite *HandlerSuite) TestAddMultipleHandlers() {
 	funcMap := NewHandlerMap()
 	funcMap.Add("testFn1", testFn)
 	funcMap.Add("testFn2", testFn)
-	if len(funcMap.handlers) != 2 {
-		t.Errorf("Expected 1 handler function, but got %d", len(funcMap.handlers))
-	}
+	suite.Equal(2, len(funcMap.handlers), "Expected 2 handlers in map")
 }
 
-func TestHandlerIdentity(t *testing.T) {
+func (suite *HandlerSuite) TestHandlerIdentity() {
 	funcMap := NewHandlerMap()
 	funcMap.Add("testFn", testFn)
 	fn1 := reflect.ValueOf(funcMap.handlers["testFn"])
 	fn2 := reflect.ValueOf(testFn)
-	if fn1.Pointer() != fn2.Pointer() {
-		t.Error("Expected same handler function, but got different function pointers")
-	}
+	suite.Equal(fn1.Pointer(), fn2.Pointer())
 }
 
-func TestHandleCallsHandlerFunction(t *testing.T) {
+func (suite *HandlerSuite) TestHandleCallsHandlerFunction() {
 	funcMap := NewHandlerMap()
 	funcMap.Add("testFn", testFn)
 	res, err := funcMap.Handle(nil, "testFn", nil)
-	if err != nil {
-		t.Errorf("Expected handler function to be called, but got error: %s", err)
-	}
-	if string(res[:]) != "Success" {
-		t.Errorf("Expected 'Success' function result, but got %s", res)
-	}
+	suite.Nil(err)
+	suite.Equal("Success", string(res[:]))
 }
 
-func TestHandleWithoutHandlerFunction(t *testing.T) {
+func (suite *HandlerSuite) TestHandleWithoutHandlerFunction() {
 	funcMap := NewHandlerMap()
 	_, err := funcMap.Handle(nil, "testFn", nil)
-	if err == nil {
-		t.Error("Expected error when trying to handle unknown function")
-	}
+	suite.NotNil(err)
 }

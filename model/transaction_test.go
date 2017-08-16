@@ -1,4 +1,4 @@
-package main
+package model
 
 import (
 	"bytes"
@@ -6,41 +6,49 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
-	"testing"
 	"time"
+
+	"github.com/stretchr/testify/suite"
 )
 
-func TestUnmarshalTransaction(t *testing.T) {
+type TransactionSuite struct {
+	suite.Suite
+}
+
+func (suite *TransactionSuite) TestGetObjectType() {
+	txPtr := &Transaction{Entity: Entity{"Transaction"}}
+	suite.Equal("Transaction", txPtr.GetObjectType())
+}
+
+func (suite *TransactionSuite) TestUnmarshalTransactionCreated() {
 	timeStr := "2016-10-28T00:00:00+11:00"
 	testTime, _ := time.Parse(time.RFC3339, timeStr)
 	b := new(bytes.Buffer)
 	fmt.Fprintf(b, "{\"created\":\"%s\"}", timeStr)
 	tx := new(Transaction)
 	err := json.Unmarshal(b.Bytes(), tx)
-	if err != nil {
-		t.Errorf("Expected transaction struct, but got %s", err)
-	}
-	if tx.Created != testTime.Unix() {
-		t.Errorf("Expected unix epoch %d, but got %d", testTime.Unix(), tx.Created)
-	}
+	suite.Nil(err)
+	suite.Equal(testTime.Unix(), tx.Created)
 }
 
-func TestMarshalTransaction(t *testing.T) {
+func (suite *TransactionSuite) TestMarshalTransactionCreated() {
 	timeStr := "2016-10-28T00:00:00+11:00"
 	testTime, _ := time.Parse(time.RFC3339, timeStr)
 	details := TxDetails{Created: testTime.Unix()}
 	tptr := &Transaction{TxDetails: details}
 	txBytes, err := json.Marshal(tptr)
-	if err != nil {
-		t.Errorf("Expected account byte slice, but got %s", err)
-	}
+	suite.Nil(err)
 	matched, _ := regexp.Match(regexp.QuoteMeta(timeStr), txBytes)
-	if !matched {
-		t.Error("Expected regexp match on time string")
-	}
+	suite.True(matched)
 }
 
-func TestTransactionListSort(t *testing.T) {
+func (suite *TransactionSuite) TestCreateTransaction() {
+	tPtr := &Transfer{"1", "1234", "2", "5678", 100, 0, "AUD", "", map[string]string(nil)}
+	txn, _ := CreateTransaction("1", "1234", tPtr, "", Credited)
+	suite.Equal(32, len(txn.ID))
+}
+
+func (suite *TransactionSuite) TestTransactionListSort() {
 	now := time.Now()
 	earlier := now.Add(-1 * time.Minute)
 	t1 := Transaction{
@@ -56,7 +64,5 @@ func TestTransactionListSort(t *testing.T) {
 	transactionList.Transactions = append(transactionList.Transactions, &t2)
 	sort.Sort(sort.Reverse(ByCreated(transactionList.Transactions)))
 
-	if transactionList.Transactions[0].ID != "2" {
-		t.Errorf("Expected transaction %s, but got transaction %s", t2.ID, t1.ID)
-	}
+	suite.Equal("2", transactionList.Transactions[0].ID)
 }
