@@ -3,8 +3,9 @@ package model
 import (
 	"encoding/json"
 	"errors"
-	"passport-chaincode/utils"
 	"time"
+
+	"github.com/mschimk1/passport-chaincode/utils"
 )
 
 // AccountObjectType blockchain object type
