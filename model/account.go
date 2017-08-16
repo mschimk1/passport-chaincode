@@ -32,11 +32,6 @@ type AccountList struct {
 	Accounts []*Account `json:"accounts"`
 }
 
-// GetObjectType returns the blockchain table name
-func (a *Account) GetObjectType() string {
-	return a.ObjectType
-}
-
 // UnmarshalJSON custom unmarshalling handles time conversion
 func (a *Account) UnmarshalJSON(data []byte) error {
 	type AccountData Account

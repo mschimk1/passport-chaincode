@@ -1,5 +1,6 @@
 package model
 
+// RatesObjectType blockchain object type
 const RatesObjectType = "Rates"
 
 // Rates represents exchange rates for a given base at a given date
@@ -12,9 +13,4 @@ type Rates struct {
 		NZD float64
 		SGD float64
 	} `json:"rates"`
-}
-
-// GetObjectType returns the blockchain table name
-func (r *Rates) GetObjectType() string {
-	return r.ObjectType
 }

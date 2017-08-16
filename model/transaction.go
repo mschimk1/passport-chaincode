@@ -54,11 +54,6 @@ type Transaction struct {
 	Status      TxStatus      `json:"status"`
 }
 
-// GetObjectType returns the blockchain object type
-func (t *Transaction) GetObjectType() string {
-	return TransactionObjectType
-}
-
 //UnmarshalJSON custom unmarshalling handles time conversion
 func (t *Transaction) UnmarshalJSON(data []byte) error {
 	type TransactionData Transaction
