@@ -26,7 +26,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
-	. "passport-chaincode/model"
+	"passport-chaincode/model"
 	"sort"
 	"strconv"
 	"unicode/utf8"
@@ -97,15 +97,15 @@ func (cc *Chaincode) GetAccountList(stub shim.ChaincodeStubInterface, args []str
 	}
 	customerID := args[0]
 	// Query state using partial keys
-	keysIter, err := cc.partialCompositeKeyQuery(stub, AccountObjectType, []string{customerID})
+	keysIter, err := cc.partialCompositeKeyQuery(stub, model.AccountObjectType, []string{customerID})
 	if err != nil {
 		logger.Errorf("Failed to get account list. Error: %s", err)
 		return nil, err
 	}
-	accountList := AccountList{}
+	accountList := model.AccountList{}
 	for keysIter.HasNext() {
 		_, accountBytes, _ := keysIter.Next()
-		acc := new(Account)
+		acc := new(model.Account)
 		if err := json.Unmarshal(accountBytes, acc); err != nil {
 			logger.Errorf("Failed to get account details. Error: %s", err)
 			continue
@@ -128,7 +128,7 @@ func (cc *Chaincode) GetAccount(stub shim.ChaincodeStubInterface, args []string)
 	customerID := args[0]
 	accountID := args[1]
 
-	key, _ := cc.createCompositeKey(AccountObjectType, []string{customerID, accountID})
+	key, _ := cc.createCompositeKey(model.AccountObjectType, []string{customerID, accountID})
 	accountBytes, err := stub.GetState(key)
 	if err != nil {
 		logger.Errorf("Failed to get account details. Error: %s", err)
@@ -145,7 +145,7 @@ func (cc *Chaincode) OpenAccount(stub shim.ChaincodeStubInterface, args []string
 		return nil, errors.New("Missing required account data JSON")
 	}
 
-	account, err := CreateAccount([]byte(args[0]))
+	account, err := model.CreateAccount([]byte(args[0]))
 	if err != nil {
 		logger.Errorf("Error when creating new account. Error: %s", err)
 		return nil, fmt.Errorf("Error creating new account. Error: %s", err)
@@ -172,7 +172,7 @@ func (cc *Chaincode) TopupAccount(stub shim.ChaincodeStubInterface, args []strin
 	if accountData == nil {
 		return nil, fmt.Errorf("Account with number %s not found.", args[1])
 	}
-	account := new(Account)
+	account := new(model.Account)
 	bytesToStruct([]byte(accountData), account)
 	amount, err := strconv.ParseInt(args[2], 10, 64)
 	if err != nil {
@@ -202,7 +202,7 @@ func (cc *Chaincode) CloseAccount(stub shim.ChaincodeStubInterface, args []strin
 		return nil, fmt.Errorf("Account with number %s not found.", args[1])
 	}
 
-	account := new(Account)
+	account := new(model.Account)
 	bytesToStruct(accountData, account)
 	account.Closed = true
 	key, _ := cc.createCompositeKey(account.GetObjectType(), []string{account.CustomerID, account.ID})
@@ -220,7 +220,7 @@ func (cc *Chaincode) TransferMoney(stub shim.ChaincodeStubInterface, args []stri
 		return nil, errors.New("Missing transfer details JSON")
 	}
 	transferData := args[0]
-	t := new(Transfer)
+	t := new(model.Transfer)
 	bytesToStruct([]byte(transferData), t)
 	if err := t.Validate(); err != nil {
 		return nil, err
@@ -232,7 +232,7 @@ func (cc *Chaincode) TransferMoney(stub shim.ChaincodeStubInterface, args []stri
 	if accountData == nil {
 		return nil, fmt.Errorf("Account with number %s not found.", t.FromAccountID)
 	}
-	fromAccount := new(Account)
+	fromAccount := new(model.Account)
 	bytesToStruct(accountData, fromAccount)
 	accountData, err = cc.GetAccount(stub, []string{t.ToCustomerID, t.ToAccountID})
 	if err != nil {
@@ -241,28 +241,28 @@ func (cc *Chaincode) TransferMoney(stub shim.ChaincodeStubInterface, args []stri
 	if accountData == nil {
 		return nil, fmt.Errorf("Account with number %s not found.", t.ToAccountID)
 	}
-	toAccount := new(Account)
+	toAccount := new(model.Account)
 	bytesToStruct(accountData, toAccount)
 
 	if fromAccount.Closed {
-		cc.recordTransaction(stub, fromAccount.CustomerID, fromAccount.ID, t, AccountClosed, Failed)
+		cc.recordTransaction(stub, fromAccount.CustomerID, fromAccount.ID, t, model.AccountClosed, model.Failed)
 		return nil, fmt.Errorf("Cannot transfer money from closed account %s", t.FromAccountID)
 	}
 
 	if toAccount.Closed {
-		cc.recordTransaction(stub, toAccount.CustomerID, toAccount.ID, t, AccountClosed, Failed)
+		cc.recordTransaction(stub, toAccount.CustomerID, toAccount.ID, t, model.AccountClosed, model.Failed)
 		return nil, fmt.Errorf("Cannot transfer money into closed account %s", t.ToAccountID)
 	}
 
 	if fromAccount.Balance-t.Amount < 0 {
-		cc.recordTransaction(stub, fromAccount.CustomerID, fromAccount.ID, t, InsufficientFunds, Failed)
+		cc.recordTransaction(stub, fromAccount.CustomerID, fromAccount.ID, t, model.InsufficientFunds, model.Failed)
 		return nil, fmt.Errorf("Insufficient funds available in account %s", t.FromAccountID)
 	}
 
 	cc.debitAccount(stub, fromAccount, t.Amount+t.Fee)
-	cc.recordTransaction(stub, fromAccount.CustomerID, fromAccount.ID, t, "", Debited)
+	cc.recordTransaction(stub, fromAccount.CustomerID, fromAccount.ID, t, "", model.Debited)
 	cc.creditAccount(stub, toAccount, t.Amount)
-	cc.recordTransaction(stub, toAccount.CustomerID, toAccount.ID, t, "", Credited)
+	cc.recordTransaction(stub, toAccount.CustomerID, toAccount.ID, t, "", model.Credited)
 
 	return nil, nil
 }
@@ -279,22 +279,22 @@ func (cc *Chaincode) GetTransactionList(stub shim.ChaincodeStubInterface, args [
 	accountID := args[1]
 
 	// Query state using partial keys
-	keysIter, err := cc.partialCompositeKeyQuery(stub, TransactionObjectType, []string{customerID, accountID})
+	keysIter, err := cc.partialCompositeKeyQuery(stub, model.TransactionObjectType, []string{customerID, accountID})
 	if err != nil {
 		logger.Errorf("Failed to get transaction list. Error: %s", err)
 		return nil, err
 	}
-	tranList := TransactionList{}
+	tranList := model.TransactionList{}
 	for keysIter.HasNext() {
 		_, txnBytes, _ := keysIter.Next()
-		txn := new(Transaction)
+		txn := new(model.Transaction)
 		if err := json.Unmarshal(txnBytes, txn); err != nil {
 			logger.Errorf("Failed to get transaction details. Error: %s", err)
 			continue
 		}
 		tranList.Transactions = append(tranList.Transactions, txn)
 	}
-	sort.Sort(sort.Reverse(ByCreated(tranList.Transactions)))
+	sort.Sort(sort.Reverse(model.ByCreated(tranList.Transactions)))
 	jsonList, _ := json.Marshal(tranList)
 	logger.Debugf("Returning transaction list: %s", jsonList)
 	return jsonList, nil
@@ -312,7 +312,7 @@ func (cc *Chaincode) GetTransaction(stub shim.ChaincodeStubInterface, args []str
 	accountID := args[1]
 	tranID := args[2]
 
-	key, _ := cc.createCompositeKey(TransactionObjectType, []string{customerID, accountID, tranID})
+	key, _ := cc.createCompositeKey(model.TransactionObjectType, []string{customerID, accountID, tranID})
 	txnBytes, err := stub.GetState(key)
 	if err != nil {
 		logger.Errorf("Failed to get transaction details. Error: %s", err)
@@ -321,8 +321,8 @@ func (cc *Chaincode) GetTransaction(stub shim.ChaincodeStubInterface, args []str
 	return txnBytes, nil
 }
 
-func (cc *Chaincode) recordTransaction(stub shim.ChaincodeStubInterface, customerID string, accountID string, t *Transfer, code TxFailureCode, status TxStatus) error {
-	txn, _ := CreateTransaction(customerID, accountID, t, code, status)
+func (cc *Chaincode) recordTransaction(stub shim.ChaincodeStubInterface, customerID string, accountID string, t *model.Transfer, code model.TxFailureCode, status model.TxStatus) error {
+	txn, _ := model.CreateTransaction(customerID, accountID, t, code, status)
 	txnData, err := json.Marshal(txn)
 	if err != nil {
 		return fmt.Errorf("Error marshalling transaction data. Error: %s", err)
@@ -332,7 +332,7 @@ func (cc *Chaincode) recordTransaction(stub shim.ChaincodeStubInterface, custome
 	return nil
 }
 
-func (cc *Chaincode) debitAccount(stub shim.ChaincodeStubInterface, a *Account, amount int64) error {
+func (cc *Chaincode) debitAccount(stub shim.ChaincodeStubInterface, a *model.Account, amount int64) error {
 	a.Debit(amount)
 	accountData, _ := json.Marshal(a)
 	key, _ := cc.createCompositeKey(a.GetObjectType(), []string{a.CustomerID, a.ID})
@@ -340,7 +340,7 @@ func (cc *Chaincode) debitAccount(stub shim.ChaincodeStubInterface, a *Account, 
 	return nil
 }
 
-func (cc *Chaincode) creditAccount(stub shim.ChaincodeStubInterface, a *Account, amount int64) error {
+func (cc *Chaincode) creditAccount(stub shim.ChaincodeStubInterface, a *model.Account, amount int64) error {
 	a.Credit(amount)
 	accountData, _ := json.Marshal(a)
 	key, _ := cc.createCompositeKey(a.GetObjectType(), []string{a.CustomerID, a.ID})
